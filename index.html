@@ -134,6 +134,7 @@ th { color: var(--text-2); font-weight: 600; }
   <div class="tiles">
     <div class="tile"><div class="label">Inne nu</div><div class="value" id="t-in">–</div><div class="hint">simulerat</div></div>
     <div class="tile"><div class="label">Ute nu</div><div class="value" id="t-out">–</div><div class="hint" id="t-place">prognos</div></div>
+    <div class="tile"><div class="label">Luftfuktighet inne</div><div class="value" id="t-rh">–</div><div class="hint" id="t-rh-hint">simulerat</div></div>
     <div class="tile"><div class="label">Elementet</div><div class="value" id="t-heat">–</div><div class="hint" id="t-heat-hint"></div></div>
     <div class="tile"><div class="label">Totalpris nu</div><div class="value" id="t-price">–</div><div class="hint" id="t-price-hint">c/kWh</div></div>
     <div class="tile"><div class="label">Kostnad, smart</div><div class="value" id="t-cost">–</div><div class="hint" id="t-cost-hint"></div></div>
@@ -159,11 +160,17 @@ th { color: var(--text-2); font-weight: 600; }
     <div class="chart-wrap"><canvas id="tempChart" aria-label="Temperatur inne och ute"></canvas></div>
   </div>
 
+  <div class="card">
+    <div class="chart-title"><h2>Luftfuktighet inne</h2><span>grönt fält = elementet på</span></div>
+    <div class="chart-wrap"><canvas id="rhChart" aria-label="Luftfuktighet inne"></canvas></div>
+  </div>
+
   <div class="card explain">
     <h2>Så tänker algoritmen</h2>
     <p>Vagnen används som ett <strong>värmebatteri</strong>. Temperaturen får variera mellan nödgränsen och lagringsgränsen.</p>
     <p>För varje kvart räknas <strong>totalpriset</strong> ut: börspris + elbolagets marginal + överföring + elskatt. Sedan planerar algoritmen hela perioden som har kända priser (ofta till midnatt i morgon). Med hjälp av väderprognosen räknar den ut hur snabbt vagnen kallnar och väljer den billigaste kombinationen av kvartar som ändå håller vagnen över nödgränsen.</p>
     <p>Följden blir att den <strong>förvärmer</strong> före dyra perioder, värmer upp till lagringsgränsen när elen är riktigt billig och bara värmer vid dyra priser om vagnen annars skulle bli för kall.</p>
+    <p><strong>Fuktregeln:</strong> mögel växer när luftfuktigheten länge ligger över 75–80 %. Varmare luft har lägre relativ fuktighet, så algoritmen räknar ut hur varmt det måste vara för att hålla fuktigheten under gränsen. Den räkningen bygger på väderprognosens temperatur och fuktighet ute. Är det fuktigt ute värmer den lite extra, helst under billiga timmar, men aldrig över lagringsgränsen. När den riktiga givaren är på plats används den uppmätta fuktigheten i stället.</p>
     <p id="compare-text"></p>
   </div>
 
@@ -177,6 +184,14 @@ th { color: var(--text-2); font-weight: 600; }
       <label>Värmeförlust (W per grad skillnad inne–ute)<input type="number" step="5" data-key="lossW"></label>
       <label>Värmekapacitet (Wh per grad)<input type="number" step="50" data-key="capWh"></label>
       <label>Jämför med vanlig termostat på (°C)<input type="number" step="0.5" data-key="thermoSet"></label>
+      <label>Fuktregel
+        <select data-key="humRule">
+          <option value="on">På</option>
+          <option value="off">Av</option>
+        </select>
+      </label>
+      <label>Fuktgräns, högsta luftfuktighet inne (%)<input type="number" step="1" data-key="humLimit"></label>
+      <label>Extra fukt inne jämfört med ute (g/m³)<input type="number" step="0.1" data-key="humExtra"></label>
     </div>
   </details>
 
@@ -239,8 +254,9 @@ const PLACES = {
 
 const DEFAULTS = {
   mode: 'auto',
-  floor: 3, max: 12, startT: 6,
+  floor: 5, max: 12, startT: 6,
   heaterW: 2000, lossW: 40, capWh: 500, thermoSet: 5,
+  humRule: 'on', humLimit: 75, humExtra: 0.5,
   margin: 0.5, tax: 2.83,
   transferType: 'flat', trFlat: 5.0, trDay: 6.0, trNight: 3.5, trWinterDay: 8.0, trOther: 3.0,
   place: 'vasa', outOffset: 0,
@@ -253,7 +269,7 @@ function save() { try { localStorage.setItem('vagnvarme', JSON.stringify(setting
 const DT = 0.25; // timmar per kvart
 let prices = [];   // { t: Date, spot: c/kWh inkl. moms }
 let weather = [];  // { t: ms, temp }
-let priceChart, tempChart;
+let priceChart, tempChart, rhChart;
 
 // --- Tid i finsk tid ---
 const helFmt = new Intl.DateTimeFormat('sv-FI', {
@@ -300,19 +316,31 @@ function fakePrices() {
 
 async function loadWeather() {
   const p = PLACES[settings.place] || PLACES.vasa;
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&hourly=temperature_2m&forecast_days=3&timeformat=unixtime`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&hourly=temperature_2m,relative_humidity_2m&forecast_days=3&timeformat=unixtime`;
   const r = await fetch(url);
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const d = await r.json();
-  return d.hourly.time.map((s, i) => ({ t: s * 1000, temp: d.hourly.temperature_2m[i] }));
+  return d.hourly.time.map((s, i) => ({ t: s * 1000, temp: d.hourly.temperature_2m[i], rh: d.hourly.relative_humidity_2m[i] }));
 }
-function outdoorAt(ms) {
-  if (!weather.length) return -5 + settings.outOffset;
+function weatherAt(ms, key, fallback) {
+  if (!weather.length) return fallback;
   let i = weather.findIndex(w => w.t > ms);
-  if (i <= 0) return (i === 0 ? weather[0].temp : weather[weather.length - 1].temp) + settings.outOffset;
+  if (i <= 0) return i === 0 ? weather[0][key] : weather[weather.length - 1][key];
   const a = weather[i - 1], b = weather[i];
-  return a.temp + (b.temp - a.temp) * (ms - a.t) / (b.t - a.t) + settings.outOffset;
+  return a[key] + (b[key] - a[key]) * (ms - a.t) / (b.t - a.t);
 }
+const outdoorAt = ms => weatherAt(ms, 'temp', -5) + settings.outOffset;
+const outdoorRhAt = ms => weatherAt(ms, 'rh', 85);
+
+// --- Fukt ---
+// Mättnadsångtryck i hPa (Magnus formel) och dess invers.
+const satVp = T => 6.112 * Math.exp(17.62 * T / (243.12 + T));
+const tempForVp = e => { const l = Math.log(e / 6.112); return 243.12 * l / (17.62 - l); };
+// Uteluften ventileras in, plus lite fukt från konstruktionen och inredningen (g/m³).
+function indoorVp(tout, rhOut) {
+  return rhOut / 100 * satVp(tout) + settings.humExtra * 461.5 * 278 / 1e5;
+}
+const indoorRh = (T, e) => Math.min(100, 100 * e / satVp(T));
 
 // --- Vagnens värmemodell ---
 function nextTemp(T, on, tout) {
@@ -329,6 +357,8 @@ function plan(slots) {
   const n = Math.round((hi - lo) / step) + 1;
   const grid = Array.from({ length: n }, (_, s) => lo + s * step);
   const penalty = T => (T < floor ? 50 * (floor - T) : 0); // frost är mycket dyrt
+  // Fuktregeln: under fuktgränsen blir luften för fuktig. Det kostar mindre än frost men mer än el.
+  const humPenalty = (T, i) => (T < slots[i].humFloor ? 5 * (slots[i].humFloor - T) : 0);
   const interp = (V, T) => {
     const x = Math.min(Math.max((T - lo) / step, 0), n - 1);
     const a = Math.floor(x), b = Math.min(a + 1, n - 1);
@@ -342,7 +372,7 @@ function plan(slots) {
   V[slots.length] = grid.map(T => Math.max(0, Tref - T) * settings.capWh / 1000 * mean + penalty(T));
   const actionCost = (i, T, on) => {
     const T2 = nextTemp(T, on, slots[i].tout);
-    return (on ? kWh * slots[i].price / 100 : 0) + penalty(T2) + interp(V[i + 1], T2);
+    return (on ? kWh * slots[i].price / 100 : 0) + penalty(T2) + humPenalty(T2, i) + interp(V[i + 1], T2);
   };
   for (let i = slots.length - 1; i >= 0; i--) {
     V[i] = grid.map(T => {
@@ -354,17 +384,18 @@ function plan(slots) {
 }
 
 function simulate(slots, decide) {
-  let T = settings.startT, prev = false, cost = 0, kWh = 0, minT = T;
+  let T = settings.startT, prev = false, cost = 0, kWh = 0, minT = T, humidHours = 0;
   const rows = slots.map((s, i) => {
     const on = decide(i, T, prev);
     const e = on ? settings.heaterW / 1000 * DT : 0;
-    const row = { ...s, tin: T, on, cost: e * s.price / 100 };
+    const row = { ...s, tin: T, rhIn: indoorRh(T, s.eIn), on, cost: e * s.price / 100 };
     cost += row.cost; kWh += e;
+    if (row.rhIn > settings.humLimit + 0.5) humidHours += DT;
     T = nextTemp(T, on, s.tout); prev = on;
     minT = Math.min(minT, T);
     return row;
   });
-  return { rows, cost, kWh, minT };
+  return { rows, cost, kWh, minT, humidHours };
 }
 
 // --- Rendering ---
@@ -415,7 +446,16 @@ function baseOptions(rows, unit) {
 function drawCharts(rows) {
   const labels = rows.map(r => hel(r.t).label);
   const s1 = css('--series-1'), s2 = css('--series-2'), muted = css('--text-3');
-  priceChart?.destroy(); tempChart?.destroy();
+  priceChart?.destroy(); tempChart?.destroy(); rhChart?.destroy();
+  rhChart = new Chart(document.getElementById('rhChart'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Inne (simulerat)', data: rows.map(r => r.rhIn), borderColor: s1, backgroundColor: s1, borderWidth: 2 },
+      { label: 'Fuktgräns', data: rows.map(() => settings.humLimit), borderColor: muted, backgroundColor: muted, borderWidth: 1, borderDash: [5, 4] },
+    ] },
+    options: baseOptions(rows, '%'),
+    plugins: [heatBands],
+  });
   priceChart = new Chart(document.getElementById('priceChart'), {
     type: 'line',
     data: { labels, datasets: [
@@ -451,6 +491,10 @@ function render() {
     const s = { t: p.t, spot: p.spot };
     s.price = totalPrice(s);
     s.tout = outdoorAt(p.t.getTime() + 450000);
+    s.eIn = indoorVp(s.tout, outdoorRhAt(p.t.getTime() + 450000));
+    // Lägsta temperatur som håller luftfuktigheten under gränsen, högst lagringsgränsen.
+    s.humNeed = tempForVp(s.eIn / (settings.humLimit / 100));
+    s.humFloor = settings.humRule === 'on' ? Math.min(s.humNeed, settings.max) : -Infinity;
     return s;
   });
   if (!slots.length) return;
@@ -469,6 +513,8 @@ function render() {
   setText('t-in', fmt(settings.startT) + ' °C');
   setText('t-out', fmt(r0.tout) + ' °C');
   setText('t-place', 'prognos, ' + (PLACES[settings.place] || PLACES.vasa).name);
+  setText('t-rh', fmt(r0.rhIn, 0) + ' %', r0.rhIn > settings.humLimit + 0.5 ? 'danger' : '');
+  setText('t-rh-hint', `simulerat, gräns ${fmt(settings.humLimit, 0)} %${settings.humRule === 'on' ? '' : ' (regeln av)'}`);
   setText('t-heat', r0.on ? 'På' : 'Av', r0.on ? 'on' : '');
   const nextChange = sim.rows.findIndex(r => r.on !== r0.on);
   setText('t-heat-hint', nextChange > 0 ? `${r0.on ? 'stängs av' : 'slås på'} ${hel(sim.rows[nextChange].t).label}` : 'ingen ändring planerad');
@@ -483,6 +529,7 @@ function render() {
   const notes = [];
   if (sim.minT < 0) notes.push({ err: true, txt: `Varning: vagnen beräknas sjunka till ${fmt(sim.minT)} °C. Risk för frysning!` });
   else if (settings.mode === 'auto' && sim.minT < settings.floor - 0.3) notes.push({ err: true, txt: `Elementet räcker inte till: temperaturen sjunker till ${fmt(sim.minT)} °C trots att det värmer. Det behövs ett starkare element eller bättre isolering.` });
+  if (sim.humidHours >= 6) notes.push({ err: true, txt: `Fuktlarm: luftfuktigheten ligger över ${fmt(settings.humLimit, 0)} % i ungefär ${fmt(sim.humidHours, 0)} timmar under perioden.${settings.humRule === 'on' ? ' Lagringsgränsen räcker inte för att få ner fukten. Höj lagringsgränsen eller kontrollera ventilationen.' : ' Slå på fuktregeln.'}` });
   if (settings.mode === 'off') notes.push({ err: sim.minT < 0, txt: 'Strömmen är avstängd. Vagnen värms inte alls.' });
   renderNotices(notes);
 
@@ -501,9 +548,9 @@ function renderNotices(extra) {
 }
 
 function renderTable(rows) {
-  let html = '<thead><tr><th>Tid</th><th>Totalpris c/kWh</th><th>Ute °C</th><th>Inne °C</th><th>Element</th></tr></thead><tbody>';
+  let html = '<thead><tr><th>Tid</th><th>Totalpris c/kWh</th><th>Ute °C</th><th>Inne °C</th><th>Fukt inne %</th><th>Element</th></tr></thead><tbody>';
   for (const r of rows) {
-    html += `<tr><td>${hel(r.t).label}</td><td>${fmt(r.price, 2)}</td><td>${fmt(r.tout)}</td><td>${fmt(r.tin)}</td><td>${r.on ? 'På' : 'Av'}</td></tr>`;
+    html += `<tr><td>${hel(r.t).label}</td><td>${fmt(r.price, 2)}</td><td>${fmt(r.tout)}</td><td>${fmt(r.tin)}</td><td>${fmt(r.rhIn, 0)}</td><td>${r.on ? 'På' : 'Av'}</td></tr>`;
   }
   document.getElementById('planTable').innerHTML = html + '</tbody>';
 }
@@ -535,7 +582,7 @@ async function loadAll() {
   if (p.status === 'fulfilled' && p.value.length) prices = p.value;
   else { prices = fakePrices(); loadNotes.push({ err: true, txt: 'Kunde inte hämta elpriserna från spot-hinta.fi. Visar påhittade priser.' }); }
   if (w.status === 'fulfilled') weather = w.value;
-  else { weather = []; loadNotes.push({ err: true, txt: 'Kunde inte hämta väderprognosen. Räknar med −5 °C ute.' }); }
+  else { weather = []; loadNotes.push({ err: true, txt: 'Kunde inte hämta väderprognosen. Räknar med −5 °C och 85 % luftfuktighet ute.' }); }
   const last = prices[prices.length - 1].t;
   document.getElementById('updated').textContent = `Priser kända till ${hel(new Date(last.getTime() + 900000)).label}. Källor: spot-hinta.fi och Open-Meteo.`;
   render();
