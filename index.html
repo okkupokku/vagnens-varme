@@ -95,6 +95,12 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .modes button small { display: block; color: var(--text-2); font-size: 12px; }
 .modes button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .chart-wrap { position: relative; height: 260px; }
+.cam { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 8px; background: #000; }
+.cam-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; color: var(--text-3); font-size: 13px; }
+.cam-bar button {
+  font: inherit; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+}
 .chart-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .chart-title span { color: var(--text-2); font-size: 13px; }
 details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
@@ -147,6 +153,15 @@ th { color: var(--text-2); font-weight: 600; }
       <button type="button" data-mode="auto">Automatiskt<small>Algoritmen väljer billigaste tider</small></button>
       <button type="button" data-mode="on">Alltid på<small>Elementet värmer hela tiden</small></button>
       <button type="button" data-mode="off">Strömmen av<small>Ingen värme alls (frysrisk)</small></button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chart-title"><h2>Kamera i vagnen</h2><span>simulerad bild</span></div>
+    <canvas id="cam" class="cam" width="960" height="540" aria-label="Simulerad kamerabild från vagnen"></canvas>
+    <div class="cam-bar">
+      <span id="cam-time"></span>
+      <button id="cam-refresh" type="button">Ta ny bild</button>
     </div>
   </div>
 
@@ -479,6 +494,140 @@ function drawCharts(rows) {
   });
 }
 
+// --- Simulerad kamerabild ---
+// Ritar vagnens inre som en övervakningskamera skulle se det: elementet lyser när det är på,
+// fönstret visar dag eller natt och snö när det är minusgrader ute.
+let lastCam = null;
+function drawCamera(row) {
+  if (!row) return;
+  lastCam = row;
+  const cv = document.getElementById('cam');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const now = new Date();
+  const h = hel(now).h;
+  const day = h >= 8 && h < 17;
+
+  // Vägg av stående panel
+  for (let x = 0; x < W; x += 48) {
+    ctx.fillStyle = (x / 48) % 2 ? '#8a6240' : '#835c3b';
+    ctx.fillRect(x, 0, 48, H * 0.72);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(x, 0, 2, H * 0.72);
+  }
+  // Golv
+  ctx.fillStyle = '#4a3423';
+  ctx.fillRect(0, H * 0.72, W, H * 0.28);
+  for (let y = H * 0.72; y < H; y += 26) {
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(0, y, W, 2);
+  }
+
+  // Fönster
+  const wx = 560, wy = 80, ww = 300, wh = 210;
+  const sky = ctx.createLinearGradient(0, wy, 0, wy + wh);
+  if (day) { sky.addColorStop(0, '#9fb8cc'); sky.addColorStop(1, '#dfe6ea'); }
+  else { sky.addColorStop(0, '#060a18'); sky.addColorStop(1, '#16203a'); }
+  ctx.fillStyle = sky;
+  ctx.fillRect(wx, wy, ww, wh);
+  // Granar utanför
+  ctx.save();
+  ctx.beginPath(); ctx.rect(wx, wy, ww, wh); ctx.clip();
+  ctx.fillStyle = day ? '#2f4a3a' : '#0b130f';
+  for (let i = 0; i < 6; i++) {
+    const tx = wx + 20 + i * 52, th = 70 + (i % 3) * 25;
+    ctx.beginPath();
+    ctx.moveTo(tx, wy + wh); ctx.lineTo(tx + 22, wy + wh - th); ctx.lineTo(tx + 44, wy + wh);
+    ctx.fill();
+  }
+  if (row.tout < 0) {
+    ctx.fillStyle = day ? '#ffffff' : '#c9d3e6';
+    ctx.fillRect(wx, wy + wh - 28, ww, 28);
+    for (let i = 0; i < 60; i++) ctx.fillRect(wx + Math.random() * ww, wy + Math.random() * (wh - 28), 3, 3);
+  } else if (!day) {
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 18; i++) ctx.fillRect(wx + Math.random() * ww, wy + Math.random() * wh * 0.5, 2, 2);
+  }
+  ctx.restore();
+  // Fönsterkarm
+  ctx.strokeStyle = '#efe9df'; ctx.lineWidth = 12;
+  ctx.strokeRect(wx, wy, ww, wh);
+  ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
+  // Imma på rutan när det är fuktigt
+  if (row.rhIn > 85) {
+    ctx.fillStyle = 'rgba(230,236,240,0.35)';
+    ctx.fillRect(wx + 6, wy + wh * 0.55, ww - 12, wh * 0.45 - 6);
+  }
+
+  // Oljeelement
+  const ex = 110, ey = 300, ew = 300, eh = 150;
+  for (let i = 0; i < 9; i++) {
+    const fx = ex + i * (ew / 9);
+    ctx.fillStyle = row.on ? '#e3dcd2' : '#cfcac2';
+    ctx.fillRect(fx + 3, ey, ew / 9 - 6, eh);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(fx + ew / 9 - 8, ey, 3, eh);
+  }
+  ctx.fillStyle = '#3a3a3a';
+  ctx.fillRect(ex - 6, ey + eh, ew + 12, 10);
+  ctx.fillStyle = row.on ? '#ff6a2a' : '#5a1f10';
+  ctx.beginPath(); ctx.arc(ex + ew - 18, ey - 12, 7, 0, Math.PI * 2); ctx.fill();
+  // Sladd till stickproppen
+  ctx.strokeStyle = '#1e1e1e'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(ex + ew, ey + eh - 10); ctx.bezierCurveTo(ex + ew + 60, ey + eh + 30, 470, 420, 470, 372); ctx.stroke();
+  ctx.fillStyle = '#f2f2f2'; ctx.fillRect(452, 340, 36, 36);
+  ctx.fillStyle = row.on ? '#3fb950' : '#555'; ctx.fillRect(466, 346, 8, 4);
+
+  // Termometer med display på väggen
+  ctx.fillStyle = '#f4f4f0'; ctx.fillRect(440, 150, 90, 70);
+  ctx.fillStyle = '#20231f';
+  ctx.font = 'bold 26px ui-monospace, Menlo, monospace';
+  ctx.fillText(fmt(row.tin) + '°', 448, 182);
+  ctx.font = '18px ui-monospace, Menlo, monospace';
+  ctx.fillText(fmt(row.rhIn, 0) + ' %', 452, 208);
+
+  // Mörker och IR-läge på natten
+  if (!day) {
+    const img = ctx.getImageData(0, 0, W, H), d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) * 0.75;
+      d[i] = g; d[i + 1] = g; d[i + 2] = g;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  // Värmeglöd från elementet, ritas efter IR-läget så att den syns även på natten
+  if (row.on) {
+    const glow = ctx.createRadialGradient(ex + ew / 2, ey + eh / 2, 20, ex + ew / 2, ey + eh / 2, 300);
+    glow.addColorStop(0, 'rgba(255,140,50,0.6)');
+    glow.addColorStop(1, 'rgba(255,140,50,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff6a2a';
+    ctx.beginPath(); ctx.arc(ex + ew - 18, ey - 12, 7, 0, Math.PI * 2); ctx.fill();
+  }
+  // Brus och vinjett som i en riktig kamera
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  for (let i = 0; i < 2500; i++) ctx.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+  const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.65);
+  vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+
+  // Textrad överst
+  const stamp = now.toLocaleString('sv-FI', { timeZone: 'Europe/Helsinki', dateStyle: 'short', timeStyle: 'medium' });
+  ctx.font = '22px ui-monospace, Menlo, monospace';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, W, 40);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('VAGN-CAM 1' + (day ? '' : '  IR'), 16, 28);
+  ctx.textAlign = 'right'; ctx.fillText(stamp, W - 16, 28); ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, H - 36, 250, 36);
+  ctx.fillStyle = '#ffd24a'; ctx.font = '18px ui-monospace, Menlo, monospace';
+  ctx.fillText('SIMULERAD BILD', 16, H - 12);
+
+  document.getElementById('cam-time').textContent = `Senaste bild ${stamp}. I verkligheten skickar kameran en ny bild var 10:e minut.`;
+}
+document.getElementById('cam-refresh').addEventListener('click', () => drawCamera(lastCam));
+
 function setText(id, txt, cls) {
   const el = document.getElementById(id);
   el.textContent = txt;
@@ -538,6 +687,7 @@ function render() {
     `Läget som är valt nu kostar ${fmt(sim.cost, 2)} € (${fmt(sim.kWh)} kWh), och vagnen håller som lägst ${fmt(sim.minT)} °C.`;
 
   drawCharts(sim.rows);
+  drawCamera(r0);
   renderTable(sim.rows);
 }
 
