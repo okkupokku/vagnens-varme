@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vagnens värme</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f3f0;
+  --surface: #fcfcfb;
+  --border: #e2e0da;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #7a7974;
+  --accent: #2a78d6;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --band: rgba(27, 175, 122, 0.16);
+  --good: #008300;
+  --warn: #b26e00;
+  --bad: #c42b2b;
+  --grid: rgba(0,0,0,0.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface: #1a1a19;
+    --border: #2e2e2c;
+    --text: #f0efec;
+    --text-2: #c3c2b7;
+    --text-3: #8f8e86;
+    --accent: #3987e5;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --band: rgba(25, 158, 112, 0.22);
+    --good: #3fb950;
+    --warn: #e0a030;
+    --bad: #ef6a6a;
+    --grid: rgba(255,255,255,0.08);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110;
+  --surface: #1a1a19;
+  --border: #2e2e2c;
+  --text: #f0efec;
+  --text-2: #c3c2b7;
+  --text-3: #8f8e86;
+  --accent: #3987e5;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --band: rgba(25, 158, 112, 0.22);
+  --good: #3fb950;
+  --warn: #e0a030;
+  --bad: #ef6a6a;
+  --grid: rgba(255,255,255,0.08);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+.sub { color: var(--text-2); margin: 0 0 16px; }
+.notice {
+  border: 1px solid var(--border); background: var(--surface);
+  border-left: 4px solid var(--warn);
+  padding: 8px 12px; border-radius: 8px; margin-bottom: 16px; color: var(--text-2);
+}
+.notice.err { border-left-color: var(--bad); }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 16px; margin-bottom: 16px;
+}
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.tile .label { color: var(--text-2); font-size: 13px; }
+.tile .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .hint { color: var(--text-3); font-size: 12px; }
+.on { color: var(--good); }
+.danger { color: var(--bad); }
+.modes { display: flex; flex-wrap: wrap; gap: 8px; }
+.modes button {
+  flex: 1 1 140px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font: inherit; cursor: pointer; text-align: left;
+}
+.modes button small { display: block; color: var(--text-2); font-size: 12px; }
+.modes button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chart-wrap { position: relative; height: 260px; }
+.chart-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.chart-title span { color: var(--text-2); font-size: 13px; }
+details { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; }
+details > summary { padding: 12px 16px; cursor: pointer; font-weight: 600; }
+details > div { padding: 0 16px 16px; }
+.form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
+input, select {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; width: 100%;
+}
+.explain p { margin: 0 0 8px; color: var(--text-2); }
+.explain p:last-child { margin-bottom: 0; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--text-2); font-weight: 600; }
+.table-scroll { max-height: 360px; overflow: auto; }
+.row-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; color: var(--text-3); font-size: 13px; }
+.row-actions button {
+  font: inherit; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Vagnens värme</h1>
+  <p class="sub">Håller vagnen frostfri och värmer när elen är billig. Prototyp med riktiga elpriser och väderprognos men en <strong>simulerad vagn</strong>, så inga riktiga enheter är kopplade än.</p>
+
+  <div id="notices"></div>
+
+  <div class="row-actions">
+    <button id="reload" type="button">Hämta nya priser</button>
+    <span id="updated"></span>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="label">Inne nu</div><div class="value" id="t-in">–</div><div class="hint">simulerat</div></div>
+    <div class="tile"><div class="label">Ute nu</div><div class="value" id="t-out">–</div><div class="hint" id="t-place">prognos</div></div>
+    <div class="tile"><div class="label">Elementet</div><div class="value" id="t-heat">–</div><div class="hint" id="t-heat-hint"></div></div>
+    <div class="tile"><div class="label">Totalpris nu</div><div class="value" id="t-price">–</div><div class="hint" id="t-price-hint">c/kWh</div></div>
+    <div class="tile"><div class="label">Kostnad, smart</div><div class="value" id="t-cost">–</div><div class="hint" id="t-cost-hint"></div></div>
+    <div class="tile"><div class="label">Besparing</div><div class="value" id="t-save">–</div><div class="hint" id="t-save-hint"></div></div>
+  </div>
+
+  <div class="card">
+    <h2>Läge</h2>
+    <div class="modes" role="group" aria-label="Läge">
+      <button type="button" data-mode="auto">Automatiskt<small>Algoritmen väljer billigaste tider</small></button>
+      <button type="button" data-mode="on">Alltid på<small>Elementet värmer hela tiden</small></button>
+      <button type="button" data-mode="off">Strömmen av<small>Ingen värme alls (frysrisk)</small></button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chart-title"><h2>Elpris per kvart</h2><span>grönt fält = elementet på</span></div>
+    <div class="chart-wrap"><canvas id="priceChart" aria-label="Elpris per kvart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <div class="chart-title"><h2>Temperatur</h2><span>grönt fält = elementet på</span></div>
+    <div class="chart-wrap"><canvas id="tempChart" aria-label="Temperatur inne och ute"></canvas></div>
+  </div>
+
+  <div class="card explain">
+    <h2>Så tänker algoritmen</h2>
+    <p>Vagnen används som ett <strong>värmebatteri</strong>. Temperaturen får variera mellan nödgränsen och lagringsgränsen.</p>
+    <p>För varje kvart räknas <strong>totalpriset</strong> ut: börspris + elbolagets marginal + överföring + elskatt. Sedan planerar algoritmen hela perioden som har kända priser (ofta till midnatt i morgon). Med hjälp av väderprognosen räknar den ut hur snabbt vagnen kallnar och väljer den billigaste kombinationen av kvartar som ändå håller vagnen över nödgränsen.</p>
+    <p>Följden blir att den <strong>förvärmer</strong> före dyra perioder, värmer upp till lagringsgränsen när elen är riktigt billig och bara värmer vid dyra priser om vagnen annars skulle bli för kall.</p>
+    <p id="compare-text"></p>
+  </div>
+
+  <details>
+    <summary>Vagnen och gränser</summary>
+    <div class="form">
+      <label>Nödgräns, värmer alltid under (°C)<input type="number" step="0.5" data-key="floor"></label>
+      <label>Lagringsgräns, värmer aldrig över (°C)<input type="number" step="0.5" data-key="max"></label>
+      <label>Temperatur inne nu (°C, simulerad)<input type="number" step="0.5" data-key="startT"></label>
+      <label>Elementets effekt (W)<input type="number" step="100" data-key="heaterW"></label>
+      <label>Värmeförlust (W per grad skillnad inne–ute)<input type="number" step="5" data-key="lossW"></label>
+      <label>Värmekapacitet (Wh per grad)<input type="number" step="50" data-key="capWh"></label>
+      <label>Jämför med vanlig termostat på (°C)<input type="number" step="0.5" data-key="thermoSet"></label>
+    </div>
+  </details>
+
+  <details>
+    <summary>Elpris och överföring</summary>
+    <div class="form">
+      <label>Elbolagets marginal (c/kWh, inkl. moms)<input type="number" step="0.01" data-key="margin"></label>
+      <label>Elskatt (c/kWh, inkl. moms)<input type="number" step="0.01" data-key="tax"></label>
+      <label>Typ av överföring
+        <select data-key="transferType">
+          <option value="flat">Allmän överföring</option>
+          <option value="time">Tidsöverföring (natt 22–07)</option>
+          <option value="season">Säsongsöverföring (vintervardag 07–22)</option>
+        </select>
+      </label>
+      <label data-show="flat">Överföring (c/kWh)<input type="number" step="0.01" data-key="trFlat"></label>
+      <label data-show="time">Överföring dag 07–22 (c/kWh)<input type="number" step="0.01" data-key="trDay"></label>
+      <label data-show="time">Överföring natt 22–07 (c/kWh)<input type="number" step="0.01" data-key="trNight"></label>
+      <label data-show="season">Vintervardag nov–mars, mån–lör 07–22 (c/kWh)<input type="number" step="0.01" data-key="trWinterDay"></label>
+      <label data-show="season">Övrig tid (c/kWh)<input type="number" step="0.01" data-key="trOther"></label>
+    </div>
+    <div><p class="sub" style="margin:12px 0 0">Överföringspriserna är exempelvärden. Byt till de som står på er elräkning.</p></div>
+  </details>
+
+  <details>
+    <summary>Plats och väder</summary>
+    <div class="form">
+      <label>Ort för väderprognosen
+        <select data-key="place">
+          <option value="vasa">Vasa</option>
+          <option value="jakobstad">Jakobstad</option>
+          <option value="karleby">Karleby</option>
+          <option value="helsingfors">Helsingfors</option>
+          <option value="abo">Åbo</option>
+          <option value="uleaborg">Uleåborg</option>
+          <option value="rovaniemi">Rovaniemi</option>
+        </select>
+      </label>
+      <label>Testa köldknäpp: ändra utetemperaturen (°C)<input type="number" step="1" data-key="outOffset"></label>
+    </div>
+  </details>
+
+  <details>
+    <summary>Planen som tabell</summary>
+    <div class="table-scroll"><table id="planTable"></table></div>
+  </details>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const PLACES = {
+  vasa: { name: 'Vasa', lat: 63.096, lon: 21.616 },
+  jakobstad: { name: 'Jakobstad', lat: 63.675, lon: 22.703 },
+  karleby: { name: 'Karleby', lat: 63.838, lon: 23.131 },
+  helsingfors: { name: 'Helsingfors', lat: 60.170, lon: 24.938 },
+  abo: { name: 'Åbo', lat: 60.451, lon: 22.267 },
+  uleaborg: { name: 'Uleåborg', lat: 65.012, lon: 25.465 },
+  rovaniemi: { name: 'Rovaniemi', lat: 66.503, lon: 25.729 },
+};
+
+const DEFAULTS = {
+  mode: 'auto',
+  floor: 3, max: 12, startT: 6,
+  heaterW: 2000, lossW: 40, capWh: 500, thermoSet: 5,
+  margin: 0.5, tax: 2.83,
+  transferType: 'flat', trFlat: 5.0, trDay: 6.0, trNight: 3.5, trWinterDay: 8.0, trOther: 3.0,
+  place: 'vasa', outOffset: 0,
+};
+
+let settings = { ...DEFAULTS };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('vagnvarme') || '{}')); } catch (e) {}
+function save() { try { localStorage.setItem('vagnvarme', JSON.stringify(settings)); } catch (e) {} }
+
+const DT = 0.25; // timmar per kvart
+let prices = [];   // { t: Date, spot: c/kWh inkl. moms }
+let weather = [];  // { t: ms, temp }
+let priceChart, tempChart;
+
+// --- Tid i finsk tid ---
+const helFmt = new Intl.DateTimeFormat('sv-FI', {
+  timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', weekday: 'short', month: 'numeric', hour12: false,
+});
+function hel(d) {
+  const p = Object.fromEntries(helFmt.formatToParts(d).map(x => [x.type, x.value]));
+  const dow = ['sön', 'mån', 'tis', 'ons', 'tors', 'fre', 'lör'].findIndex(w => (p.weekday || '').startsWith(w));
+  return { h: +p.hour % 24, m: +p.minute, dow, month: +p.month, label: `${p.weekday} ${p.hour}:${p.minute}` };
+}
+
+// --- Priser ---
+function transferPrice(d) {
+  const { h, dow, month } = hel(d);
+  const day = h >= 7 && h < 22;
+  if (settings.transferType === 'time') return day ? settings.trDay : settings.trNight;
+  if (settings.transferType === 'season') {
+    const winter = month >= 11 || month <= 3;
+    return winter && dow !== 0 && day ? settings.trWinterDay : settings.trOther;
+  }
+  return settings.trFlat;
+}
+function totalPrice(slot) {
+  return slot.spot + settings.margin + transferPrice(slot.t) + settings.tax;
+}
+
+async function loadPrices() {
+  const r = await fetch('https://api.spot-hinta.fi/TodayAndDayForward');
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const data = await r.json();
+  return data.map(x => ({ t: new Date(x.DateTime), spot: x.PriceWithTax * 100 }));
+}
+function fakePrices() {
+  const out = [];
+  const start = new Date(); start.setMinutes(Math.floor(start.getMinutes() / 15) * 15, 0, 0);
+  for (let i = 0; i < 132; i++) {
+    const t = new Date(start.getTime() + i * 900000);
+    const h = hel(t).h + hel(t).m / 60;
+    const peak = Math.exp(-((h - 8) ** 2) / 4) * 12 + Math.exp(-((h - 18) ** 2) / 5) * 15;
+    out.push({ t, spot: 2 + peak + Math.sin(i / 7) * 1.5 });
+  }
+  return out;
+}
+
+async function loadWeather() {
+  const p = PLACES[settings.place] || PLACES.vasa;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&hourly=temperature_2m&forecast_days=3&timeformat=unixtime`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const d = await r.json();
+  return d.hourly.time.map((s, i) => ({ t: s * 1000, temp: d.hourly.temperature_2m[i] }));
+}
+function outdoorAt(ms) {
+  if (!weather.length) return -5 + settings.outOffset;
+  let i = weather.findIndex(w => w.t > ms);
+  if (i <= 0) return (i === 0 ? weather[0].temp : weather[weather.length - 1].temp) + settings.outOffset;
+  const a = weather[i - 1], b = weather[i];
+  return a.temp + (b.temp - a.temp) * (ms - a.t) / (b.t - a.t) + settings.outOffset;
+}
+
+// --- Vagnens värmemodell ---
+function nextTemp(T, on, tout) {
+  const kW = settings.heaterW / 1000, UA = settings.lossW / 1000, C = settings.capWh / 1000;
+  return T + DT * ((on ? kW : 0) - UA * (T - tout)) / C;
+}
+
+// --- Algoritmen: dynamisk programmering över temperatur ---
+// V[i](T) = lägsta kostnad (€) från kvart i och framåt om vagnen har temperaturen T.
+function plan(slots) {
+  const { floor, max } = settings;
+  const kWh = settings.heaterW / 1000 * DT;
+  const lo = floor - 4, hi = max + 1, step = 0.1;
+  const n = Math.round((hi - lo) / step) + 1;
+  const grid = Array.from({ length: n }, (_, s) => lo + s * step);
+  const penalty = T => (T < floor ? 50 * (floor - T) : 0); // frost är mycket dyrt
+  const interp = (V, T) => {
+    const x = Math.min(Math.max((T - lo) / step, 0), n - 1);
+    const a = Math.floor(x), b = Math.min(a + 1, n - 1);
+    return V[a] + (V[b] - V[a]) * (x - a);
+  };
+  // Slutvärde: vagnen ska lämnas med lite marginal över nödgränsen när planen tar slut,
+  // annars kostar det ungefär medelpriset att värma upp den igen.
+  const mean = slots.reduce((s, x) => s + x.price, 0) / slots.length / 100;
+  const Tref = floor + 1;
+  const V = new Array(slots.length + 1);
+  V[slots.length] = grid.map(T => Math.max(0, Tref - T) * settings.capWh / 1000 * mean + penalty(T));
+  const actionCost = (i, T, on) => {
+    const T2 = nextTemp(T, on, slots[i].tout);
+    return (on ? kWh * slots[i].price / 100 : 0) + penalty(T2) + interp(V[i + 1], T2);
+  };
+  for (let i = slots.length - 1; i >= 0; i--) {
+    V[i] = grid.map(T => {
+      const off = actionCost(i, T, false);
+      return T >= max ? off : Math.min(off, actionCost(i, T, true));
+    });
+  }
+  return (i, T) => T < max && actionCost(i, T, true) < actionCost(i, T, false);
+}
+
+function simulate(slots, decide) {
+  let T = settings.startT, prev = false, cost = 0, kWh = 0, minT = T;
+  const rows = slots.map((s, i) => {
+    const on = decide(i, T, prev);
+    const e = on ? settings.heaterW / 1000 * DT : 0;
+    const row = { ...s, tin: T, on, cost: e * s.price / 100 };
+    cost += row.cost; kWh += e;
+    T = nextTemp(T, on, s.tout); prev = on;
+    minT = Math.min(minT, T);
+    return row;
+  });
+  return { rows, cost, kWh, minT };
+}
+
+// --- Rendering ---
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (x, d = 1) => x.toLocaleString('sv-FI', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+const heatBands = {
+  id: 'heatBands',
+  beforeDatasetsDraw(chart) {
+    const rows = chart.options.plugins.heatBands.rows;
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    if (!rows) return;
+    ctx.save();
+    ctx.fillStyle = css('--band');
+    const w = (x.getPixelForValue(1) - x.getPixelForValue(0));
+    rows.forEach((r, i) => {
+      if (!r.on) return;
+      const px = x.getPixelForValue(i);
+      ctx.fillRect(px, a.top, w + 0.5, a.bottom - a.top);
+    });
+    ctx.restore();
+  },
+};
+
+function baseOptions(rows, unit) {
+  const text2 = css('--text-2'), grid = css('--grid');
+  return {
+    animation: false, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { ticks: { color: text2, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false } },
+      y: { ticks: { color: text2, callback: v => v + ' ' + unit }, grid: { color: grid }, border: { display: false } },
+    },
+    plugins: {
+      heatBands: { rows },
+      legend: { labels: { color: text2, boxWidth: 14, boxHeight: 2, usePointStyle: false } },
+      tooltip: {
+        callbacks: {
+          label: c => `${c.dataset.label}: ${fmt(c.parsed.y)} ${unit}`,
+          footer: items => (rows[items[0].dataIndex].on ? 'Elementet på' : 'Elementet av'),
+        },
+      },
+    },
+    elements: { point: { radius: 0, hoverRadius: 4 } },
+  };
+}
+
+function drawCharts(rows) {
+  const labels = rows.map(r => hel(r.t).label);
+  const s1 = css('--series-1'), s2 = css('--series-2'), muted = css('--text-3');
+  priceChart?.destroy(); tempChart?.destroy();
+  priceChart = new Chart(document.getElementById('priceChart'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Totalpris', data: rows.map(r => r.price), borderColor: s1, backgroundColor: s1, borderWidth: 2, stepped: true },
+      { label: 'Börspris', data: rows.map(r => r.spot), borderColor: s2, backgroundColor: s2, borderWidth: 1.5, stepped: true },
+    ] },
+    options: baseOptions(rows, 'c'),
+    plugins: [heatBands],
+  });
+  const tempOpts = baseOptions(rows, '°C');
+  tempChart = new Chart(document.getElementById('tempChart'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Inne (simulerat)', data: rows.map(r => r.tin), borderColor: s1, backgroundColor: s1, borderWidth: 2 },
+      { label: 'Ute (prognos)', data: rows.map(r => r.tout), borderColor: s2, backgroundColor: s2, borderWidth: 2 },
+      { label: 'Nödgräns', data: rows.map(() => settings.floor), borderColor: muted, backgroundColor: muted, borderWidth: 1, borderDash: [5, 4] },
+      { label: 'Lagringsgräns', data: rows.map(() => settings.max), borderColor: muted, backgroundColor: muted, borderWidth: 1, borderDash: [2, 3] },
+    ] },
+    options: tempOpts,
+    plugins: [heatBands],
+  });
+}
+
+function setText(id, txt, cls) {
+  const el = document.getElementById(id);
+  el.textContent = txt;
+  if (cls !== undefined) el.className = el.className.split(' ').filter(c => c === 'value' || c === 'hint').concat(cls ? [cls] : []).join(' ');
+}
+
+function render() {
+  const nowMs = Date.now() - 900000;
+  const slots = prices.filter(p => p.t.getTime() > nowMs).map(p => {
+    const s = { t: p.t, spot: p.spot };
+    s.price = totalPrice(s);
+    s.tout = outdoorAt(p.t.getTime() + 450000);
+    return s;
+  });
+  if (!slots.length) return;
+
+  const smartDecide = plan(slots);
+  const decide = {
+    auto: (i, T) => smartDecide(i, T),
+    on: (i, T) => T < 25,
+    off: () => false,
+  }[settings.mode];
+  const sim = simulate(slots, decide);
+  const thermo = simulate(slots, (i, T, prev) => (T < settings.thermoSet ? true : T > settings.thermoSet + 0.5 ? false : prev));
+  const hours = Math.round(slots.length * DT);
+
+  const r0 = sim.rows[0];
+  setText('t-in', fmt(settings.startT) + ' °C');
+  setText('t-out', fmt(r0.tout) + ' °C');
+  setText('t-place', 'prognos, ' + (PLACES[settings.place] || PLACES.vasa).name);
+  setText('t-heat', r0.on ? 'På' : 'Av', r0.on ? 'on' : '');
+  const nextChange = sim.rows.findIndex(r => r.on !== r0.on);
+  setText('t-heat-hint', nextChange > 0 ? `${r0.on ? 'stängs av' : 'slås på'} ${hel(sim.rows[nextChange].t).label}` : 'ingen ändring planerad');
+  setText('t-price', fmt(r0.price, 2));
+  setText('t-price-hint', `c/kWh, varav börspris ${fmt(r0.spot, 2)}`);
+  setText('t-cost', fmt(sim.cost, 2) + ' €');
+  setText('t-cost-hint', `närmaste ${hours} h, ${fmt(sim.kWh)} kWh`);
+  const saved = thermo.cost - sim.cost;
+  setText('t-save', fmt(saved, 2) + ' €', saved < 0 ? 'danger' : '');
+  setText('t-save-hint', `jfr termostat +${fmt(settings.thermoSet)} °C (${fmt(thermo.cost, 2)} €)`);
+
+  const notes = [];
+  if (sim.minT < 0) notes.push({ err: true, txt: `Varning: vagnen beräknas sjunka till ${fmt(sim.minT)} °C. Risk för frysning!` });
+  else if (settings.mode === 'auto' && sim.minT < settings.floor - 0.3) notes.push({ err: true, txt: `Elementet räcker inte till: temperaturen sjunker till ${fmt(sim.minT)} °C trots att det värmer. Det behövs ett starkare element eller bättre isolering.` });
+  if (settings.mode === 'off') notes.push({ err: sim.minT < 0, txt: 'Strömmen är avstängd. Vagnen värms inte alls.' });
+  renderNotices(notes);
+
+  document.getElementById('compare-text').innerHTML =
+    `<strong>Jämförelse de närmaste ${hours} timmarna:</strong> en vanlig termostat på +${fmt(settings.thermoSet)} °C skulle kosta ${fmt(thermo.cost, 2)} € (${fmt(thermo.kWh)} kWh). ` +
+    `Läget som är valt nu kostar ${fmt(sim.cost, 2)} € (${fmt(sim.kWh)} kWh), och vagnen håller som lägst ${fmt(sim.minT)} °C.`;
+
+  drawCharts(sim.rows);
+  renderTable(sim.rows);
+}
+
+let loadNotes = [];
+function renderNotices(extra) {
+  document.getElementById('notices').innerHTML = loadNotes.concat(extra)
+    .map(n => `<div class="notice${n.err ? ' err' : ''}">${n.txt}</div>`).join('');
+}
+
+function renderTable(rows) {
+  let html = '<thead><tr><th>Tid</th><th>Totalpris c/kWh</th><th>Ute °C</th><th>Inne °C</th><th>Element</th></tr></thead><tbody>';
+  for (const r of rows) {
+    html += `<tr><td>${hel(r.t).label}</td><td>${fmt(r.price, 2)}</td><td>${fmt(r.tout)}</td><td>${fmt(r.tin)}</td><td>${r.on ? 'På' : 'Av'}</td></tr>`;
+  }
+  document.getElementById('planTable').innerHTML = html + '</tbody>';
+}
+
+// --- Formulär ---
+function syncForm() {
+  document.querySelectorAll('[data-key]').forEach(el => { el.value = settings[el.dataset.key]; });
+  document.querySelectorAll('[data-show]').forEach(el => { el.hidden = el.dataset.show !== settings.transferType; });
+  document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === settings.mode));
+}
+document.querySelectorAll('[data-key]').forEach(el => {
+  el.addEventListener('change', async () => {
+    const k = el.dataset.key;
+    settings[k] = el.type === 'number' ? (parseFloat(el.value) || 0) : el.value;
+    if (settings.max <= settings.floor) settings.max = settings.floor + 1;
+    save(); syncForm();
+    if (k === 'place') await loadAll(); else render();
+  });
+});
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  settings.mode = b.dataset.mode; save(); syncForm(); render();
+}));
+document.getElementById('reload').addEventListener('click', () => loadAll());
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+
+async function loadAll() {
+  loadNotes = [];
+  const [p, w] = await Promise.allSettled([loadPrices(), loadWeather()]);
+  if (p.status === 'fulfilled' && p.value.length) prices = p.value;
+  else { prices = fakePrices(); loadNotes.push({ err: true, txt: 'Kunde inte hämta elpriserna från spot-hinta.fi. Visar påhittade priser.' }); }
+  if (w.status === 'fulfilled') weather = w.value;
+  else { weather = []; loadNotes.push({ err: true, txt: 'Kunde inte hämta väderprognosen. Räknar med −5 °C ute.' }); }
+  const last = prices[prices.length - 1].t;
+  document.getElementById('updated').textContent = `Priser kända till ${hel(new Date(last.getTime() + 900000)).label}. Källor: spot-hinta.fi och Open-Meteo.`;
+  render();
+}
+
+syncForm();
+loadAll();
+</script>
+</body>
+</html>
